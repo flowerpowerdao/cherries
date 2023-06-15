@@ -5,10 +5,6 @@ import Result "mo:base/Result";
 import Buffer "mo:base/Buffer";
 import Debug "mo:base/Debug";
 import Nat32 "mo:base/Nat32";
-import Array "mo:base/Array";
-import Nat "mo:base/Nat";
-import Option "mo:base/Option";
-import Time "mo:base/Time";
 
 import AID "../toniq-labs/util/AccountIdentifier";
 import ExtCore "../toniq-labs/ext/Core";
@@ -116,10 +112,6 @@ module {
           };
         };
       };
-    };
-
-    public func getOwners() : [(Types.AccountIdentifier, Buffer.Buffer<Types.TokenIndex>)]{
-      return Iter.toArray(_owners.entries())
     };
 
     public func mintNextToken() {

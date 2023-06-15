@@ -197,8 +197,6 @@ shared ({ caller = init_minter }) actor class Canister(cid : Principal, initArgs
         ignore cronDisbursements();
         ignore cronSalesSettlements();
         ignore cronFailedSales();
-        // temp
-        _Sale.airdropUnsoldCherries();
       },
     );
 
