@@ -26,7 +26,10 @@ module {
     var _supply = 0 : Types.Balance;
 
     public func toStableChunk(chunkSize : Nat, chunkIndex : Nat) : Types.StableChunk {
-      ? #v1({
+      if (chunkIndex != 0) {
+        return null;
+      };
+      ?#v1({
         tokenMetadata = Iter.toArray(_tokenMetadata.entries());
         owners = Iter.toArray(
           Iter.map<(Types.AccountIdentifier, Buffer.Buffer<Types.TokenIndex>), (Types.AccountIdentifier, [Types.TokenIndex])>(

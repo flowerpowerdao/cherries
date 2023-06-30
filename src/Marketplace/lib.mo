@@ -36,7 +36,6 @@ module {
     var _transactions : Buffer.Buffer<Types.Transaction> = Buffer.Buffer(0);
     var _tokenSettlement : TrieMap.TrieMap<Types.TokenIndex, Types.Settlement> = TrieMap.TrieMap(ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
     var _tokenListing : TrieMap.TrieMap<Types.TokenIndex, Types.Listing> = TrieMap.TrieMap(ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
-    var _frontends : TrieMap.TrieMap<Text, Types.Frontend> = TrieMap.TrieMap(Text.equal, Text.hash);
 
     public func getChunkCount(chunkSize : Nat) : Nat {
       var count = _transactions.size() / chunkSize;
@@ -49,40 +48,34 @@ module {
     public func toStableChunk(chunkSize : Nat, chunkIndex : Nat) : Types.StableChunk {
       let start = Nat.min(_transactions.size(), chunkSize * chunkIndex);
       let count = Nat.min(chunkSize, _transactions.size() - start);
-      let transactionChunk = if (_transactions.size() == 0 or count == 0) {
-        []
-      }
-      else {
+      let transactionChunk = if (_transactions.size() == 0 or count == 0) { [] } else {
         Buffer.toArray(Buffer.subBuffer(_transactions, start, count));
       };
 
       if (chunkIndex == 0) {
-        return ?#v1({
+        return ? #v1({
           transactionCount = _transactions.size();
           transactionChunk;
           tokenSettlement = Iter.toArray(_tokenSettlement.entries());
           tokenListing = Iter.toArray(_tokenListing.entries());
-          frontends = Iter.toArray(_frontends.entries());
+          frontends = [];
         });
-      }
-      else if (chunkIndex < getChunkCount(chunkSize)) {
-        return ?#v1_chunk({ transactionChunk });
-      }
-      else {
+      } else if (chunkIndex < getChunkCount(chunkSize)) {
+        return ? #v1_chunk({ transactionChunk });
+      } else {
         null;
       };
     };
 
     public func loadStableChunk(chunk : Types.StableChunk) {
       switch (chunk) {
-        case (?#v1(data)) {
+        case (? #v1(data)) {
           _transactions := Buffer.Buffer<Types.Transaction>(data.transactionCount);
           _transactions.append(Buffer.fromArray(data.transactionChunk));
           _tokenSettlement := TrieMap.fromEntries(data.tokenSettlement.vals(), ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
           _tokenListing := TrieMap.fromEntries(data.tokenListing.vals(), ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
-          _frontends := TrieMap.fromEntries(data.frontends.vals(), Text.equal, Text.hash);
         };
-        case (?#v1_chunk(data)) {
+        case (? #v1_chunk(data)) {
           _transactions.append(Buffer.fromArray(data.transactionChunk));
         };
         case (null) {};
@@ -109,7 +102,7 @@ module {
     * PUBLIC INTERFACE *
     ********************/
 
-    public func lock(caller : Principal, tokenid : Types.TokenIdentifier, price : Nat64, address : Types.AccountIdentifier, _subaccountNOTUSED : Types.SubAccount, frontendIdentifier : ?Text) : async Result.Result<Types.AccountIdentifier, Types.CommonError> {
+    public func lock(caller : Principal, tokenid : Types.TokenIdentifier, price : Nat64, address : Types.AccountIdentifier, _subaccountNOTUSED : Types.SubAccount, frontendIdentifier : ?Text) : async* Result.Result<Types.AccountIdentifier, Types.CommonError> {
       if (ExtCore.TokenIdentifier.isPrincipal(tokenid, config.canister) == false) {
         return #err(#InvalidToken(tokenid));
       };
@@ -151,7 +144,7 @@ module {
       // check if there is a previous settlement that has never been settled
       switch (_tokenSettlement.get(token)) {
         case (?settlement) {
-          let resp : Result.Result<(), Types.CommonError> = await settle(caller, tokenid);
+          let resp : Result.Result<(), Types.CommonError> = await* settle(caller, tokenid);
           switch (resp) {
             case (#ok) {
               return #err(#Other("Listing has sold"));
@@ -180,7 +173,7 @@ module {
       return #ok(paymentAddress);
     };
 
-    public func settle(caller : Principal, tokenid : Types.TokenIdentifier) : async Result.Result<(), Types.CommonError> {
+    public func settle(caller : Principal, tokenid : Types.TokenIdentifier) : async* Result.Result<(), Types.CommonError> {
       if (ExtCore.TokenIdentifier.isPrincipal(tokenid, config.canister) == false) {
         return #err(#InvalidToken(tokenid));
       };
@@ -298,7 +291,7 @@ module {
       return #ok();
     };
 
-    public func list(caller : Principal, request : Types.ListRequest) : async Result.Result<(), Types.CommonError> {
+    public func list(caller : Principal, request : Types.ListRequest) : async* Result.Result<(), Types.CommonError> {
       // marketplace is open either when marketDelay has passed or collection sold out
       let marketDelay = Utils.toNanos(Option.get(config.marketDelay, #days(2)));
       if (Time.now() < config.publicSaleStart + marketDelay) {
@@ -321,7 +314,7 @@ module {
 
       switch (_tokenSettlement.get(token)) {
         case (?settlement) {
-          let resp : Result.Result<(), Types.CommonError> = await settle(caller, request.token);
+          let resp : Result.Result<(), Types.CommonError> = await* settle(caller, request.token);
           switch (resp) {
             case (#ok) {
               return #err(#Other("Listing is sold"));
@@ -436,7 +429,7 @@ module {
       (res.0, res.1, res.2, floor, _tokenListing.size(), deps._Tokens.registrySize(), _transactions.size());
     };
 
-    public func cronSettlements(caller : Principal) : async () {
+    public func cronSettlements(caller : Principal) : async* () {
       // only failed settlments are settled here
       //  even though the result is ignored, if settle traps the catch block is executed
       // it doesn't matter if this is executed multiple times on the same settlement, `settle` checks if it's already settled
@@ -444,7 +437,7 @@ module {
         switch (unlockedSettlements().keys().next()) {
           case (?tokenindex) {
             try {
-              ignore (await settle(caller, ExtCore.TokenIdentifier.fromPrincipal(config.canister, tokenindex)));
+              ignore (await* settle(caller, ExtCore.TokenIdentifier.fromPrincipal(config.canister, tokenindex)));
             } catch (e) {
               break settleLoop;
             };
@@ -463,9 +456,12 @@ module {
     };
 
     public func frontends() : [(Text, Types.Frontend)] {
-      Array.map<(Text, Types.AccountIdentifier, Nat64), (Text, Types.Frontend)>(config.marketplaces, func((id, accountIdentifier, fee)) {
-        (id, { accountIdentifier; fee; });
-      });
+      Array.map<(Text, Types.AccountIdentifier, Nat64), (Text, Types.Frontend)>(
+        config.marketplaces,
+        func((id, accountIdentifier, fee)) {
+          (id, { accountIdentifier; fee });
+        },
+      );
     };
 
     /********************
@@ -477,11 +473,14 @@ module {
 
       for (marketplace in config.marketplaces.vals()) {
         if (marketplace.0 == identifier) {
-          return { accountIdentifier = marketplace.1; fee = marketplace.2; };
+          return { accountIdentifier = marketplace.1; fee = marketplace.2 };
         };
       };
 
-      return { accountIdentifier = config.marketplaces[0].1; fee = config.marketplaces[0].2; }
+      return {
+        accountIdentifier = config.marketplaces[0].1;
+        fee = config.marketplaces[0].2;
+      };
     };
 
     func validFrontendIndentifier(frontendIdentifier : ?Text) : Bool {
