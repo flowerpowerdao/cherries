@@ -33,7 +33,7 @@ module {
     * STATE *
     *********/
 
-    var _transactions : Buffer.Buffer<Types.Transaction> = Buffer.Buffer(0);
+    var _transactions : Buffer.Buffer<Types.TransactionV2> = Buffer.Buffer(0);
     var _tokenSettlement : TrieMap.TrieMap<Types.TokenIndex, Types.Settlement> = TrieMap.TrieMap(ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
     var _tokenListing : TrieMap.TrieMap<Types.TokenIndex, Types.Listing> = TrieMap.TrieMap(ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
 
@@ -53,29 +53,46 @@ module {
       };
 
       if (chunkIndex == 0) {
-        return ? #v1({
+        return ?#v2({
           transactionCount = _transactions.size();
           transactionChunk;
           tokenSettlement = Iter.toArray(_tokenSettlement.entries());
           tokenListing = Iter.toArray(_tokenListing.entries());
-          frontends = [];
         });
       } else if (chunkIndex < getChunkCount(chunkSize)) {
-        return ? #v1_chunk({ transactionChunk });
+        return ?#v2_chunk({ transactionChunk });
       } else {
         null;
       };
     };
 
     public func loadStableChunk(chunk : Types.StableChunk) {
+      func txV1toV2(transaction : Types.Transaction) : Types.TransactionV2 {
+        {
+          transaction with
+          sellerFrontend = null;
+          buyerFrontend = null;
+        }
+      };
+
       switch (chunk) {
-        case (? #v1(data)) {
-          _transactions := Buffer.Buffer<Types.Transaction>(data.transactionCount);
+        // v1 -> v2
+        case (?#v1(data)) {
+          _transactions := Buffer.Buffer<Types.TransactionV2>(data.transactionCount);
+          _transactions.append(Buffer.fromArray(Array.map(data.transactionChunk, txV1toV2)));
+          _tokenSettlement := TrieMap.fromEntries(data.tokenSettlement.vals(), ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
+          _tokenListing := TrieMap.fromEntries(data.tokenListing.vals(), ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
+        };
+        case (?#v1_chunk(data)) {
+          _transactions.append(Buffer.fromArray(Array.map(data.transactionChunk, txV1toV2)));
+        };
+        case (?#v2(data)) {
+          _transactions := Buffer.Buffer<Types.TransactionV2>(data.transactionCount);
           _transactions.append(Buffer.fromArray(data.transactionChunk));
           _tokenSettlement := TrieMap.fromEntries(data.tokenSettlement.vals(), ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
           _tokenListing := TrieMap.fromEntries(data.tokenListing.vals(), ExtCore.TokenIndex.equal, ExtCore.TokenIndex.hash);
         };
-        case (? #v1_chunk(data)) {
+        case (?#v2_chunk(data)) {
           _transactions.append(Buffer.fromArray(data.transactionChunk));
         };
         case (null) {};
@@ -92,6 +109,8 @@ module {
           price = fuzz.nat64.random();
           buyer = fuzz.text.randomAlphanumeric(32);
           time = fuzz.int.randomRange(1670000000000000000, 2670000000000000000);
+          sellerFrontend = null;
+          buyerFrontend = null;
         });
       };
 
@@ -133,8 +152,7 @@ module {
       _tokenListing.put(
         token,
         {
-          seller = listing.seller;
-          price = listing.price;
+          listing with
           locked = ?(Time.now() + Utils.toNanos(Option.get(config.escrowDelay, #minutes(2))));
           sellerFrontend = listing.sellerFrontend;
           buyerFrontend = frontendIdentifier;
@@ -284,6 +302,8 @@ module {
         price = settlement.price;
         buyer = settlement.buyer;
         time = Time.now();
+        buyerFrontend = settlement.buyerFrontend;
+        sellerFrontend = settlement.sellerFrontend;
       });
       _tokenListing.delete(token);
       _tokenSettlement.delete(token);
@@ -377,7 +397,7 @@ module {
       };
     };
 
-    public func transactions() : [Types.Transaction] {
+    public func transactions() : [Types.TransactionV2] {
       Buffer.toArray(_transactions);
     };
 
@@ -410,10 +430,10 @@ module {
     };
 
     public func stats() : (Nat64, Nat64, Nat64, Nat64, Nat, Nat, Nat) {
-      var res : (Nat64, Nat64, Nat64) = Array.foldLeft<Types.Transaction, (Nat64, Nat64, Nat64)>(
+      var res : (Nat64, Nat64, Nat64) = Array.foldLeft<Types.TransactionV2, (Nat64, Nat64, Nat64)>(
         Buffer.toArray(_transactions),
         (0, 0, 0),
-        func(b : (Nat64, Nat64, Nat64), a : Types.Transaction) : (Nat64, Nat64, Nat64) {
+        func(b : (Nat64, Nat64, Nat64), a : Types.TransactionV2) : (Nat64, Nat64, Nat64) {
           var total : Nat64 = b.0 + a.price;
           var high : Nat64 = b.1;
           var low : Nat64 = b.2;
@@ -503,7 +523,7 @@ module {
       _transactions.size();
     };
 
-    public func getTransactions() : Buffer.Buffer<Types.Transaction> {
+    public func getTransactions() : Buffer.Buffer<Types.TransactionV2> {
       return _transactions;
     };
 
