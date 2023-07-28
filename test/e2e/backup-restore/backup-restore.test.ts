@@ -15,19 +15,10 @@ describe('backup', () => {
   let chunkSize = 1500n;
   let user = new User('');
 
-  it('apply env', async () => {
-    await applyEnv('restore');
-  });
-
   it('try to restore with restoreEnabled = false', async () => {
-    await expect(user.mainActor.restoreChunk({v1: {
-      marketplace: [],
-      assets: [],
-      sale: [],
-      disburser: [],
-      tokens: [],
-      shuffle: [],
-    }})).rejects.toThrow(/Restore disabled/);
+    expect(() => {
+      execSync(`dfx canister call test restoreChunk '(variant {v1 = record {}})'`)
+    }).toThrow(/Restore disabled/);
   });
 
   it(`grow up to ${growSize * BigInt(growCount)}`, async () => {
